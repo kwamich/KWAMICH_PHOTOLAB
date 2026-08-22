@@ -12,6 +12,8 @@ import { UploadZone } from '../../components/common/UploadZone';
 import { BeforeAfterSlider } from '../../components/common/BeforeAfterSlider';
 import { TransformCanvas } from '../../components/common/TransformCanvas';
 import type { TransformState } from '../../components/common/TransformCanvas';
+import { CropCanvas } from '../../components/common/CropCanvas';
+import type { CropRect } from '../../components/common/CropCanvas';
 import { 
   Camera, Wand2, Scaling, FileArchive, Crop, ArrowRightLeft, Sparkles, Printer, 
   Download, SlidersHorizontal, Image as ImageIcon, RotateCcw, ChevronDown 
@@ -42,6 +44,10 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
   // Transform canvas state (for the resize tool)
   const [liveTransform, setLiveTransform] = useState<TransformState | null>(null);
   const [inspectorOverride, setInspectorOverride] = useState<Partial<TransformState> | undefined>(undefined);
+
+  // Crop canvas state (for the crop tool)
+  const [cropAspectRatio, setCropAspectRatio] = useState<string>('1:1');
+  const [liveCropRect, setLiveCropRect] = useState<CropRect | null>(null);
 
   const handleTransformChange = useCallback((t: TransformState) => {
     setLiveTransform(t);
@@ -191,7 +197,7 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
             )}
           </div>
 
-          {/* Main Image Display / Transform Canvas / Split Slider */}
+          {/* Main Image Display / Transform Canvas / Crop Canvas / Split Slider */}
           <div className="w-full h-full max-h-[calc(100vh-12rem)] flex items-center justify-center p-6">
             {/* Interactive Transform Canvas when resize tool is active */}
             {activeTool === 'resize' ? (
@@ -204,6 +210,17 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
                   onCommit={handleTransformCommit}
                   externalTransform={inspectorOverride}
                   maintainAspect={true}
+                />
+              </div>
+            ) : activeTool === 'crop' ? (
+              <div className="w-full h-full relative">
+                <CropCanvas
+                  imageUrl={currentDisplayUrl}
+                  naturalWidth={activeImage.metadata.width}
+                  naturalHeight={activeImage.metadata.height}
+                  aspectRatio={cropAspectRatio}
+                  onApplyCrop={handleApplyCrop}
+                  onCropChange={setLiveCropRect}
                 />
               </div>
             ) : showBeforeAfter && processedObjectUrl ? (
@@ -275,7 +292,10 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
           {activeTool === 'crop' && (
             <PhotoCropperTool
               activeImage={activeImage}
-              onApplyCrop={handleApplyCrop}
+              aspectRatio={cropAspectRatio}
+              onAspectRatioChange={setCropAspectRatio}
+              cropRect={liveCropRect}
+              onApplyCropTrigger={() => {}}
             />
           )}
 
@@ -355,7 +375,12 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
               <ImageCompressorTool activeImage={activeImage} onApplyCompression={handleApplyCompression} />
             )}
             {activeTool === 'crop' && (
-              <PhotoCropperTool activeImage={activeImage} onApplyCrop={handleApplyCrop} />
+              <PhotoCropperTool
+                activeImage={activeImage}
+                aspectRatio={cropAspectRatio}
+                onAspectRatioChange={setCropAspectRatio}
+                cropRect={liveCropRect}
+              />
             )}
             {activeTool === 'converter' && (
               <ImageConverterTool activeImage={activeImage} onApplyConversion={handleApplyConversion} />

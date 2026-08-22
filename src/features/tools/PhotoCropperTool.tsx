@@ -1,208 +1,106 @@
-import React, { useState } from 'react';
+import React from 'react';
 import type { ActiveImage } from '../../types';
-import { Crop, RotateCw, RefreshCcw } from 'lucide-react';
+import type { CropRect } from '../../components/common/CropCanvas';
+import { Crop, Sparkles, Check, Move } from 'lucide-react';
 
 interface PhotoCropperToolProps {
   activeImage: ActiveImage;
-  onApplyCrop: (croppedCanvas: HTMLCanvasElement) => void;
+  aspectRatio: string;
+  onAspectRatioChange: (ratio: string) => void;
+  cropRect?: CropRect | null;
+  onApplyCropTrigger?: () => void;
 }
 
 export const PhotoCropperTool: React.FC<PhotoCropperToolProps> = ({
   activeImage,
-  onApplyCrop
+  aspectRatio,
+  onAspectRatioChange,
+  cropRect,
 }) => {
-  const [aspectRatio, setAspectRatio] = useState<string>('1:1'); // 'free', '1:1', '3:4', '4:3', '16:9', '35:45'
-  const [rotation, setRotation] = useState<number>(0);
-  const [panX, setPanX] = useState<number>(0);
-  const [panY, setPanY] = useState<number>(0);
-
-  const handleReset = () => {
-    setRotation(0);
-    setPanX(0);
-    setPanY(0);
-  };
-
-  const handleApply = async () => {
-    const img = new Image();
-    img.src = activeImage.objectUrl;
-    await img.decode();
-
-    const origW = img.naturalWidth || img.width;
-    const origH = img.naturalHeight || img.height;
-
-    // Calculate crop bounds based on aspect ratio preset
-    let targetW = origW;
-    let targetH = origH;
-
-    if (aspectRatio === '1:1') {
-      const minDim = Math.min(origW, origH);
-      targetW = minDim;
-      targetH = minDim;
-    } else if (aspectRatio === '35:45') {
-      if (origW / origH > 35 / 45) {
-        targetH = origH;
-        targetW = Math.round(origH * (35 / 45));
-      } else {
-        targetW = origW;
-        targetH = Math.round(origW * (45 / 35));
-      }
-    } else if (aspectRatio === '4:3') {
-      targetH = Math.round(origW * (3 / 4));
-      if (targetH > origH) {
-        targetH = origH;
-        targetW = Math.round(origH * (4 / 3));
-      }
-    } else if (aspectRatio === '16:9') {
-      targetH = Math.round(origW * (9 / 16));
-      if (targetH > origH) {
-        targetH = origH;
-        targetW = Math.round(origH * (16 / 9));
-      }
-    }
-
-    const cropX = Math.max(0, Math.round((origW - targetW) / 2 + (panX * origW / 100)));
-    const cropY = Math.max(0, Math.round((origH - targetH) / 2 + (panY * origH / 100)));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = targetW;
-    canvas.height = targetH;
-    const ctx = canvas.getContext('2d')!;
-
-    // High quality rendering
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-
-    if (rotation !== 0) {
-      ctx.translate(targetW / 2, targetH / 2);
-      ctx.rotate((rotation * Math.PI) / 180);
-      ctx.drawImage(img, -targetW / 2, -targetH / 2, targetW, targetH);
-    } else {
-      ctx.drawImage(img, cropX, cropY, targetW, targetH, 0, 0, targetW, targetH);
-    }
-
-    onApplyCrop(canvas);
-  };
+  const PRESETS = [
+    { id: '1:1', label: '1:1 Square (Passport / Visa)', desc: 'Standard passport square photo' },
+    { id: '35:45', label: '35:45 (Schengen & UK)', desc: 'European standard 35x45mm' },
+    { id: '4:3', label: '4:3 Standard Photo', desc: 'Traditional camera frame' },
+    { id: '16:9', label: '16:9 Widescreen', desc: 'Display & wallpaper format' },
+    { id: 'free', label: 'Freeform Crop', desc: 'Custom unconstrained frame' },
+  ];
 
   return (
     <div className="space-y-6">
-      
       {/* Title */}
       <div>
         <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-          <span>Photo Cropper & Frame Alignment</span>
+          <Crop className="w-5 h-5 text-blue-500" />
+          <span>Interactive Visual Cropper</span>
         </h3>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Crop image to exact aspect ratio guides for passports and digital forms.
+          Resize crop handles and use the attached zoom slider directly on the picture to eliminate unwanted areas.
         </p>
       </div>
+
+      {/* Live Crop Selection Badge */}
+      {cropRect && (
+        <div className="p-3.5 rounded-2xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+              <Move className="w-3.5 h-3.5 text-blue-500" />
+              Active Selection Box:
+            </span>
+            <span className="font-extrabold text-blue-700 dark:text-blue-300 font-mono text-sm">
+              {Math.round(cropRect.width)} × {Math.round(cropRect.height)} px
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            Source Resolution: {activeImage.metadata.width} × {activeImage.metadata.height} px
+          </p>
+        </div>
+      )}
 
       {/* Aspect Ratio Selector */}
       <div className="space-y-2">
         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-          Aspect Ratio Presets
+          Aspect Ratio Guides
         </label>
-        <div className="grid grid-cols-3 gap-2 text-xs">
-          {[
-            { id: '1:1', label: '1:1 Square (Passport)' },
-            { id: '35:45', label: '35:45 (EU Passport)' },
-            { id: '4:3', label: '4:3 Standard' },
-            { id: '16:9', label: '16:9 Widescreen' },
-            { id: 'free', label: 'Original Ratio' },
-          ].map((r) => (
+        <div className="space-y-2">
+          {PRESETS.map((r) => (
             <button
               key={r.id}
-              onClick={() => setAspectRatio(r.id)}
-              className={`p-2.5 rounded-xl border text-center font-semibold transition-all ${
+              onClick={() => onAspectRatioChange(r.id)}
+              className={`w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between ${
                 aspectRatio === r.id
-                  ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
-                  : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                  ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-950/40 ring-2 ring-blue-500/20 shadow-sm'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600'
               }`}
             >
-              {r.label}
+              <div>
+                <span className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                  {r.label}
+                </span>
+                <span className="block text-[11px] text-slate-500 dark:text-slate-400">
+                  {r.desc}
+                </span>
+              </div>
+              {aspectRatio === r.id && (
+                <Check className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+              )}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Rotation & Zoom Controls */}
-      <div className="space-y-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-        
-        {/* Rotation */}
-        <div className="space-y-1">
-          <div className="flex justify-between text-xs">
-            <span className="font-semibold text-slate-700 dark:text-slate-300">Rotation:</span>
-            <span className="font-bold text-slate-900 dark:text-slate-100">{rotation}°</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="range"
-              min={-180}
-              max={180}
-              value={rotation}
-              onChange={(e) => setRotation(Number(e.target.value))}
-              className="flex-1 h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
-            />
-            <button
-              onClick={() => setRotation((r) => (r + 90) % 360)}
-              className="p-1.5 rounded-lg bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200"
-              title="Rotate 90°"
-            >
-              <RotateCw className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Horizontal Pan */}
-        <div className="space-y-1">
-          <div className="flex justify-between text-xs">
-            <span className="font-semibold text-slate-700 dark:text-slate-300">Horizontal Shift:</span>
-            <span className="font-bold text-slate-900 dark:text-slate-100">{panX}%</span>
-          </div>
-          <input
-            type="range"
-            min={-30}
-            max={30}
-            value={panX}
-            onChange={(e) => setPanX(Number(e.target.value))}
-            className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
-          />
-        </div>
-
-        {/* Vertical Pan */}
-        <div className="space-y-1">
-          <div className="flex justify-between text-xs">
-            <span className="font-semibold text-slate-700 dark:text-slate-300">Vertical Shift:</span>
-            <span className="font-bold text-slate-900 dark:text-slate-100">{panY}%</span>
-          </div>
-          <input
-            type="range"
-            min={-30}
-            max={30}
-            value={panY}
-            onChange={(e) => setPanY(Number(e.target.value))}
-            className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
-          />
-        </div>
-
-        <button
-          onClick={handleReset}
-          className="w-full py-1.5 rounded-lg bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center justify-center gap-1.5"
-        >
-          <RefreshCcw className="w-3.5 h-3.5" />
-          <span>Reset Alignments</span>
-        </button>
-
+      {/* Interactive Canvas Controls Tips */}
+      <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5 text-xs text-slate-600 dark:text-slate-300">
+        <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+          <Sparkles className="w-4 h-4 text-amber-500" />
+          Pro Crop Tips
+        </span>
+        <ul className="space-y-1.5 list-disc list-inside text-[11px] text-slate-500 dark:text-slate-400">
+          <li><strong>Attached Zoom Slider:</strong> Adjust the slider below the image to zoom in/out smoothly.</li>
+          <li><strong>Drag Corners:</strong> Pull any corner bracket to resize the crop boundary.</li>
+          <li><strong>Pan / Reposition:</strong> Click and drag inside or outside the frame to reposition the subject.</li>
+          <li><strong>Rule-of-Thirds:</strong> Use the on-screen grid to perfectly align eyes and shoulders.</li>
+        </ul>
       </div>
-
-      {/* Apply Action */}
-      <button
-        onClick={handleApply}
-        className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
-      >
-        <Crop className="w-4 h-4" />
-        <span>Apply Crop & Positioning</span>
-      </button>
-
     </div>
   );
 };
