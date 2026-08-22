@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import type { ActiveImage, CompressionConfig, EnhancementConfig, PassportPreset, ResizeConfig, ToolType } from '../../types';
 import { PassportPhotoTool } from '../tools/PassportPhotoTool';
 import { BackgroundRemoverTool } from '../tools/BackgroundRemoverTool';
@@ -10,6 +10,8 @@ import { PhotoEnhancerTool } from '../tools/PhotoEnhancerTool';
 import { PassportSheetMakerTool } from '../tools/PassportSheetMakerTool';
 import { UploadZone } from '../../components/common/UploadZone';
 import { BeforeAfterSlider } from '../../components/common/BeforeAfterSlider';
+import { TransformCanvas } from '../../components/common/TransformCanvas';
+import type { TransformState } from '../../components/common/TransformCanvas';
 import { 
   Camera, Wand2, Scaling, FileArchive, Crop, ArrowRightLeft, Sparkles, Printer, 
   Download, SlidersHorizontal, Image as ImageIcon, RotateCcw, ChevronDown 
@@ -36,6 +38,27 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
   const [processedBlob, setProcessedBlob] = useState<Blob | null>(null);
   const [showBeforeAfter, setShowBeforeAfter] = useState<boolean>(false);
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState<boolean>(true);
+
+  // Transform canvas state (for the resize tool)
+  const [liveTransform, setLiveTransform] = useState<TransformState | null>(null);
+  const [inspectorOverride, setInspectorOverride] = useState<Partial<TransformState> | undefined>(undefined);
+
+  const handleTransformChange = useCallback((t: TransformState) => {
+    setLiveTransform(t);
+  }, []);
+
+  const handleTransformCommit = useCallback((canvas: HTMLCanvasElement) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        handleUpdateImageResult(blob, url);
+      }
+    }, 'image/png', 1);
+  }, []);
+
+  const handleInspectorChange = useCallback((partial: Partial<TransformState>) => {
+    setInspectorOverride(partial);
+  }, []);
 
   if (!activeImage) {
     return (
@@ -168,9 +191,22 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
             )}
           </div>
 
-          {/* Main Image Display / Split Slider */}
+          {/* Main Image Display / Transform Canvas / Split Slider */}
           <div className="w-full h-full max-h-[calc(100vh-12rem)] flex items-center justify-center p-6">
-            {showBeforeAfter && processedObjectUrl ? (
+            {/* Interactive Transform Canvas when resize tool is active */}
+            {activeTool === 'resize' ? (
+              <div className="w-full h-full relative">
+                <TransformCanvas
+                  imageUrl={currentDisplayUrl}
+                  naturalWidth={activeImage.metadata.width}
+                  naturalHeight={activeImage.metadata.height}
+                  onChange={handleTransformChange}
+                  onCommit={handleTransformCommit}
+                  externalTransform={inspectorOverride}
+                  maintainAspect={true}
+                />
+              </div>
+            ) : showBeforeAfter && processedObjectUrl ? (
               <BeforeAfterSlider
                 beforeUrl={activeImage.objectUrl}
                 afterUrl={processedObjectUrl}
@@ -224,6 +260,8 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
             <ImageResizerTool
               activeImage={activeImage}
               onApplyResize={handleApplyResize}
+              liveTransform={liveTransform}
+              onInspectorChange={handleInspectorChange}
             />
           )}
 
@@ -311,7 +349,7 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
               <BackgroundRemoverTool activeImage={activeImage} onUpdateImageResult={handleUpdateImageResult} />
             )}
             {activeTool === 'resize' && (
-              <ImageResizerTool activeImage={activeImage} onApplyResize={handleApplyResize} />
+              <ImageResizerTool activeImage={activeImage} onApplyResize={handleApplyResize} liveTransform={liveTransform} onInspectorChange={handleInspectorChange} />
             )}
             {activeTool === 'compress' && (
               <ImageCompressorTool activeImage={activeImage} onApplyCompression={handleApplyCompression} />
