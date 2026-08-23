@@ -65,6 +65,8 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     let targetW = drawW;
     let targetH = drawH;
 
+    // In free mode, the crop frame snaps to the full displayed image (no ratio constraint)
+    // In preset modes, constrain to the selected aspect ratio
     if (aspectRatio !== 'free') {
       let r = 1;
       if (aspectRatio === '1:1') r = 1;
@@ -89,7 +91,8 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     onCropChange?.(newRect);
   }, [canvasSize, aspectRatio, loadedSize, onCropChange]);
 
-  // Load image whenever URL changes and reset
+  // Load image ONLY when the URL changes — do NOT depend on initCropRect
+  // so changing aspect ratio won't reload the image and reset zoom/pan/rotation
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -102,9 +105,9 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
       setZoom(1);
       setRotation(0);
       setImagePan({ x: 0, y: 0 });
-      initCropRect(nw, nh);
     };
-  }, [imageUrl, initCropRect]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageUrl]);
 
   // Handle container resize
   useEffect(() => {
@@ -120,11 +123,12 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     return () => observer.disconnect();
   }, []);
 
+  // Re-init crop rect when canvas size, aspect ratio, or loaded image size changes
   useEffect(() => {
-    if (canvasSize.w > 0 && canvasSize.h > 0) {
+    if (canvasSize.w > 0 && canvasSize.h > 0 && loadedSize.w > 0) {
       initCropRect();
     }
-  }, [canvasSize, aspectRatio, initCropRect]);
+  }, [canvasSize, aspectRatio, loadedSize, initCropRect]);
 
   // Main rendering loop
   const render = useCallback(() => {
