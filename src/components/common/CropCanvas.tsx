@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { ZoomIn, RotateCw, RefreshCcw, Check, Move, Grid } from 'lucide-react';
+import { ZoomIn, RotateCw, RefreshCcw, Check, Move, Grid, Sparkles } from 'lucide-react';
+import confetti from 'canvas-confetti';
 
 export interface CropRect {
   x: number;
@@ -38,6 +39,7 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
   const [imagePan, setImagePan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [cropRect, setCropRect] = useState<CropRect>({ x: 50, y: 50, width: 300, height: 300 });
   const [showGrid, setShowGrid] = useState<boolean>(true);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const dragRef = useRef<{
     handle: HandleType;
@@ -47,7 +49,7 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     origPan: { x: number; y: number };
   } | null>(null);
 
-  // Initialize crop rect based on aspect ratio & canvas dimensions
+  // Initialize crop frame directly matching the displayed image boundaries (Photoshop style)
   const initCropRect = useCallback((curW?: number, curH?: number) => {
     const cw = canvasSize.w;
     const ch = canvasSize.h;
@@ -56,33 +58,38 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     const imgW = curW || loadedSize.w;
     const imgH = curH || loadedSize.h;
 
-    const padding = 60;
-    const maxW = Math.max(80, cw - padding * 2);
-    const maxH = Math.max(80, ch - padding * 2);
+    const baseScale = Math.min((cw * 0.82) / imgW, (ch * 0.82) / imgH);
+    const drawW = imgW * baseScale;
+    const drawH = imgH * baseScale;
 
-    let targetRatio = 1;
-    if (aspectRatio === '1:1') targetRatio = 1;
-    else if (aspectRatio === '35:45') targetRatio = 35 / 45;
-    else if (aspectRatio === '4:3') targetRatio = 4 / 3;
-    else if (aspectRatio === '16:9') targetRatio = 16 / 9;
-    else if (aspectRatio === 'free') targetRatio = imgW / imgH;
+    let targetW = drawW;
+    let targetH = drawH;
 
-    let w = maxW;
-    let h = w / targetRatio;
-    if (h > maxH) {
-      h = maxH;
-      w = h * targetRatio;
+    if (aspectRatio !== 'free') {
+      let r = 1;
+      if (aspectRatio === '1:1') r = 1;
+      else if (aspectRatio === '35:45') r = 35 / 45;
+      else if (aspectRatio === '4:3') r = 4 / 3;
+      else if (aspectRatio === '16:9') r = 16 / 9;
+
+      if (drawW / drawH > r) {
+        targetW = drawH * r;
+        targetH = drawH;
+      } else {
+        targetW = drawW;
+        targetH = drawW / r;
+      }
     }
 
-    const x = (cw - w) / 2;
-    const y = (ch - h) / 2;
+    const x = (cw - targetW) / 2;
+    const y = (ch - targetH) / 2;
 
-    const newRect = { x, y, width: w, height: h };
+    const newRect = { x, y, width: targetW, height: targetH };
     setCropRect(newRect);
     onCropChange?.(newRect);
   }, [canvasSize, aspectRatio, loadedSize, onCropChange]);
 
-  // Load image whenever URL changes and reset transforms
+  // Load image whenever URL changes and reset
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -149,7 +156,7 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     ctx.translate(cx, cy);
     ctx.rotate((rotation * Math.PI) / 180);
 
-    const baseScale = Math.min((w * 0.8) / nw, (h * 0.8) / nh);
+    const baseScale = Math.min((w * 0.82) / nw, (h * 0.82) / nh);
     const drawW = nw * baseScale * zoom;
     const drawH = nh * baseScale * zoom;
 
@@ -158,8 +165,8 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
     ctx.restore();
 
-    // Dark scrim around crop box
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
+    // Dark semi-transparent scrim over the unwanted/trimmed areas (Photoshop style)
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.70)';
     // Top
     ctx.fillRect(0, 0, w, cropRect.y);
     // Bottom
@@ -174,13 +181,13 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     ctx.lineWidth = 2;
     ctx.strokeRect(cropRect.x, cropRect.y, cropRect.width, cropRect.height);
 
-    // Rule-of-thirds Grid
+    // Rule-of-thirds Grid inside crop box
     if (showGrid) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
 
-      // Vertical lines
+      // Vertical grid lines
       for (let i = 1; i <= 2; i++) {
         const gx = cropRect.x + (cropRect.width / 3) * i;
         ctx.beginPath();
@@ -189,7 +196,7 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
         ctx.stroke();
       }
 
-      // Horizontal lines
+      // Horizontal grid lines
       for (let i = 1; i <= 2; i++) {
         const gy = cropRect.y + (cropRect.height / 3) * i;
         ctx.beginPath();
@@ -200,58 +207,67 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
       ctx.setLineDash([]);
     }
 
-    // Handles (Corner and Edge handles)
-    const handleSize = 10;
-    const corners = [
-      { x: cropRect.x, y: cropRect.y },
-      { x: cropRect.x + cropRect.width, y: cropRect.y },
-      { x: cropRect.x + cropRect.width, y: cropRect.y + cropRect.height },
-      { x: cropRect.x, y: cropRect.y + cropRect.height },
-    ];
-
-    // Corner L-brackets
+    // Handles: 4 Corners + 4 Edges (Photoshop style)
+    const armLen = 18;
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 3;
-    const armLen = 16;
+    ctx.lineWidth = 3.5;
 
-    // NW
+    // NW Corner
     ctx.beginPath();
     ctx.moveTo(cropRect.x, cropRect.y + armLen);
     ctx.lineTo(cropRect.x, cropRect.y);
     ctx.lineTo(cropRect.x + armLen, cropRect.y);
     ctx.stroke();
 
-    // NE
+    // NE Corner
     ctx.beginPath();
     ctx.moveTo(cropRect.x + cropRect.width - armLen, cropRect.y);
     ctx.lineTo(cropRect.x + cropRect.width, cropRect.y);
     ctx.lineTo(cropRect.x + cropRect.width, cropRect.y + armLen);
     ctx.stroke();
 
-    // SE
+    // SE Corner
     ctx.beginPath();
     ctx.moveTo(cropRect.x + cropRect.width, cropRect.y + cropRect.height - armLen);
     ctx.lineTo(cropRect.x + cropRect.width, cropRect.y + cropRect.height);
     ctx.lineTo(cropRect.x + cropRect.width - armLen, cropRect.y + cropRect.height);
     ctx.stroke();
 
-    // SW
+    // SW Corner
     ctx.beginPath();
     ctx.moveTo(cropRect.x + armLen, cropRect.y + cropRect.height);
     ctx.lineTo(cropRect.x, cropRect.y + cropRect.height);
     ctx.lineTo(cropRect.x, cropRect.y + cropRect.height - armLen);
     ctx.stroke();
 
-    // Corner Dots
-    corners.forEach((c) => {
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, handleSize / 2, 0, Math.PI * 2);
-      ctx.fillStyle = '#3b82f6';
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    });
+    // Edge bars (North, South, East, West)
+    const barLen = 16;
+    const midX = cropRect.x + cropRect.width / 2;
+    const midY = cropRect.y + cropRect.height / 2;
+
+    // N
+    ctx.beginPath();
+    ctx.moveTo(midX - barLen, cropRect.y);
+    ctx.lineTo(midX + barLen, cropRect.y);
+    ctx.stroke();
+
+    // S
+    ctx.beginPath();
+    ctx.moveTo(midX - barLen, cropRect.y + cropRect.height);
+    ctx.lineTo(midX + barLen, cropRect.y + cropRect.height);
+    ctx.stroke();
+
+    // W
+    ctx.beginPath();
+    ctx.moveTo(cropRect.x, midY - barLen);
+    ctx.lineTo(cropRect.x, midY + barLen);
+    ctx.stroke();
+
+    // E
+    ctx.beginPath();
+    ctx.moveTo(cropRect.x + cropRect.width, midY - barLen);
+    ctx.lineTo(cropRect.x + cropRect.width, midY + barLen);
+    ctx.stroke();
 
     // Dimension label mapped to real output resolution
     const currentScale = baseScale * zoom;
@@ -264,7 +280,7 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     const badgeY = cropRect.y + cropRect.height + 8;
 
     if (badgeY + 22 < h) {
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
       ctx.beginPath();
       ctx.roundRect(badgeX, badgeY, textWidth + 16, 22, 6);
       ctx.fill();
@@ -282,16 +298,19 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     const threshold = 18;
     const { x: cx, y: cy, width: cw, height: ch } = cropRect;
 
+    // Corners
     if (Math.hypot(x - cx, y - cy) <= threshold) return 'nw';
     if (Math.hypot(x - (cx + cw), y - cy) <= threshold) return 'ne';
     if (Math.hypot(x - (cx + cw), y - (cy + ch)) <= threshold) return 'se';
     if (Math.hypot(x - cx, y - (cy + ch)) <= threshold) return 'sw';
 
+    // Edges
     if (Math.abs(y - cy) <= threshold && x >= cx && x <= cx + cw) return 'n';
     if (Math.abs(y - (cy + ch)) <= threshold && x >= cx && x <= cx + cw) return 's';
     if (Math.abs(x - cx) <= threshold && y >= cy && y <= cy + ch) return 'w';
     if (Math.abs(x - (cx + cw)) <= threshold && y >= cy && y <= cy + ch) return 'e';
 
+    // Body (move crop box)
     if (x > cx && x < cx + cw && y > cy && y < cy + ch) return 'body';
 
     return 'image-pan';
@@ -369,7 +388,7 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
         ny = origCrop.y + (origCrop.height - nh);
       }
 
-      // Maintain aspect ratio if set
+      // Maintain aspect ratio if preset selected
       if (aspectRatio !== 'free') {
         let r = 1;
         if (aspectRatio === '1:1') r = 1;
@@ -400,8 +419,8 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     dragRef.current = null;
   };
 
-  // Perform 100% Accurate Full-Resolution Crop
-  const handleApply = () => {
+  // Perform 100% Accurate Full-Resolution Crop (Photoshop style)
+  const handleApply = useCallback(() => {
     const img = imageRef.current;
     if (!img) return;
 
@@ -411,7 +430,7 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     const nh = img.naturalHeight || loadedSize.h;
 
     // Calculate scale factor relating screen pixels to original full-resolution pixels
-    const baseScale = Math.min((w * 0.8) / nw, (h * 0.8) / nh);
+    const baseScale = Math.min((w * 0.82) / nw, (h * 0.82) / nh);
     const currentScale = baseScale * zoom;
 
     // Full-resolution target dimensions
@@ -447,15 +466,35 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     ctx.drawImage(img, -nw / 2, -nh / 2, nw, nh);
     ctx.restore();
 
-    onApplyCrop(outCanvas);
-  };
+    // Trigger celebration & success feedback
+    confetti({ particleCount: 40, spread: 50, origin: { y: 0.8 } });
+    setSuccessMessage(`Trimmed to ${outW} × ${outH} px!`);
+    setTimeout(() => setSuccessMessage(null), 3000);
 
-  const handleReset = () => {
+    onApplyCrop(outCanvas);
+  }, [canvasSize, loadedSize, zoom, cropRect, imagePan, rotation, onApplyCrop]);
+
+  const handleReset = useCallback(() => {
     setZoom(1);
     setRotation(0);
     setImagePan({ x: 0, y: 0 });
     initCropRect();
-  };
+  }, [initCropRect]);
+
+  // Keyboard Shortcuts: Enter to Apply Crop, Escape to Reset (Photoshop UX)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleApply();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleReset();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleApply, handleReset]);
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center select-none" ref={containerRef}>
@@ -471,11 +510,19 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
         className="w-full h-full block touch-none"
       />
 
-      {/* Top Floating Helper Tooltip */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 px-3.5 py-1.5 rounded-full bg-slate-900/80 backdrop-blur text-white text-xs font-semibold shadow-lg pointer-events-none flex items-center gap-2">
+      {/* Top Floating Helper Tooltip with Enter key shortcut */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 px-4 py-1.5 rounded-full bg-slate-900/85 backdrop-blur text-white text-xs font-semibold shadow-xl pointer-events-none flex items-center gap-2 border border-slate-700/50">
         <Move className="w-3.5 h-3.5 text-blue-400" />
-        <span>Drag corner handles to resize crop frame • Drag image to reposition</span>
+        <span>Drag edges & corners to trim unwanted areas • Press <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-600 rounded text-[10px] font-mono text-blue-300">Enter ↵</kbd> or click <strong>Apply Crop</strong> to cut</span>
       </div>
+
+      {/* Success Toast */}
+      {successMessage && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold shadow-2xl flex items-center gap-2 animate-bounce">
+          <Sparkles className="w-4 h-4" />
+          <span>{successMessage}</span>
+        </div>
+      )}
 
       {/* DIRECT FLOATING SLIDERS ATTACHED TO THE PICTURE */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex flex-col md:flex-row items-center gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl">
@@ -543,7 +590,7 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
           <button
             onClick={handleReset}
             className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition-colors flex items-center gap-1.5"
-            title="Reset crop and alignments"
+            title="Reset crop (Esc)"
           >
             <RefreshCcw className="w-3.5 h-3.5" />
             <span>Reset</span>
@@ -551,10 +598,11 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
 
           <button
             onClick={handleApply}
-            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-lg shadow-blue-500/25 transition-all flex items-center gap-1.5"
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-lg shadow-blue-500/25 transition-all flex items-center gap-1.5"
+            title="Apply Crop & Trim (Enter)"
           >
             <Check className="w-4 h-4" />
-            <span>Apply Crop</span>
+            <span>Apply Crop ↵</span>
           </button>
         </div>
       </div>
