@@ -32,6 +32,7 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
   const imageRef = useRef<HTMLImageElement | null>(null);
 
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: 600 });
+  const [loadedSize, setLoadedSize] = useState({ w: naturalWidth || 800, h: naturalHeight || 600 });
   const [zoom, setZoom] = useState<number>(1);
   const [rotation, setRotation] = useState<number>(0);
   const [imagePan, setImagePan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -46,16 +47,57 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     origPan: { x: number; y: number };
   } | null>(null);
 
-  // Load image
+  // Initialize crop rect based on aspect ratio & canvas dimensions
+  const initCropRect = useCallback((curW?: number, curH?: number) => {
+    const cw = canvasSize.w;
+    const ch = canvasSize.h;
+    if (cw <= 0 || ch <= 0) return;
+
+    const imgW = curW || loadedSize.w;
+    const imgH = curH || loadedSize.h;
+
+    const padding = 60;
+    const maxW = Math.max(80, cw - padding * 2);
+    const maxH = Math.max(80, ch - padding * 2);
+
+    let targetRatio = 1;
+    if (aspectRatio === '1:1') targetRatio = 1;
+    else if (aspectRatio === '35:45') targetRatio = 35 / 45;
+    else if (aspectRatio === '4:3') targetRatio = 4 / 3;
+    else if (aspectRatio === '16:9') targetRatio = 16 / 9;
+    else if (aspectRatio === 'free') targetRatio = imgW / imgH;
+
+    let w = maxW;
+    let h = w / targetRatio;
+    if (h > maxH) {
+      h = maxH;
+      w = h * targetRatio;
+    }
+
+    const x = (cw - w) / 2;
+    const y = (ch - h) / 2;
+
+    const newRect = { x, y, width: w, height: h };
+    setCropRect(newRect);
+    onCropChange?.(newRect);
+  }, [canvasSize, aspectRatio, loadedSize, onCropChange]);
+
+  // Load image whenever URL changes and reset transforms
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.src = imageUrl;
     img.onload = () => {
       imageRef.current = img;
-      render();
+      const nw = img.naturalWidth;
+      const nh = img.naturalHeight;
+      setLoadedSize({ w: nw, h: nh });
+      setZoom(1);
+      setRotation(0);
+      setImagePan({ x: 0, y: 0 });
+      initCropRect(nw, nh);
     };
-  }, [imageUrl]);
+  }, [imageUrl, initCropRect]);
 
   // Handle container resize
   useEffect(() => {
@@ -70,34 +112,6 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-
-  // Initialize crop rect based on aspect ratio & canvas dimensions
-  const initCropRect = useCallback(() => {
-    const padding = 60;
-    const maxW = Math.max(100, canvasSize.w - padding * 2);
-    const maxH = Math.max(100, canvasSize.h - padding * 2);
-
-    let targetRatio = 1;
-    if (aspectRatio === '1:1') targetRatio = 1;
-    else if (aspectRatio === '35:45') targetRatio = 35 / 45;
-    else if (aspectRatio === '4:3') targetRatio = 4 / 3;
-    else if (aspectRatio === '16:9') targetRatio = 16 / 9;
-    else if (aspectRatio === 'free') targetRatio = naturalWidth / naturalHeight;
-
-    let w = maxW;
-    let h = w / targetRatio;
-    if (h > maxH) {
-      h = maxH;
-      w = h * targetRatio;
-    }
-
-    const x = (canvasSize.w - w) / 2;
-    const y = (canvasSize.h - h) / 2;
-
-    const newRect = { x, y, width: w, height: h };
-    setCropRect(newRect);
-    onCropChange?.(newRect);
-  }, [canvasSize, aspectRatio, naturalWidth, naturalHeight, onCropChange]);
 
   useEffect(() => {
     if (canvasSize.w > 0 && canvasSize.h > 0) {
@@ -125,6 +139,9 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
       }
     }
 
+    const nw = img.naturalWidth || loadedSize.w;
+    const nh = img.naturalHeight || loadedSize.h;
+
     // Draw transformed image
     ctx.save();
     const cx = w / 2 + imagePan.x;
@@ -132,9 +149,9 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     ctx.translate(cx, cy);
     ctx.rotate((rotation * Math.PI) / 180);
 
-    const baseScale = Math.min((w * 0.8) / naturalWidth, (h * 0.8) / naturalHeight);
-    const drawW = naturalWidth * baseScale * zoom;
-    const drawH = naturalHeight * baseScale * zoom;
+    const baseScale = Math.min((w * 0.8) / nw, (h * 0.8) / nh);
+    const drawW = nw * baseScale * zoom;
+    const drawH = nh * baseScale * zoom;
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
@@ -236,8 +253,11 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
       ctx.stroke();
     });
 
-    // Dimension label
-    const dimText = `${Math.round(cropRect.width)} × ${Math.round(cropRect.height)} px`;
+    // Dimension label mapped to real output resolution
+    const currentScale = baseScale * zoom;
+    const realW = Math.max(1, Math.round(cropRect.width / currentScale));
+    const realH = Math.max(1, Math.round(cropRect.height / currentScale));
+    const dimText = `${realW} × ${realH} px`;
     ctx.font = 'bold 11px Inter, sans-serif';
     const textWidth = ctx.measureText(dimText).width;
     const badgeX = cropRect.x + (cropRect.width - textWidth - 16) / 2;
@@ -251,7 +271,7 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
       ctx.fillStyle = '#ffffff';
       ctx.fillText(dimText, badgeX + 8, badgeY + 15);
     }
-  }, [canvasSize, imagePan, zoom, rotation, cropRect, showGrid, naturalWidth, naturalHeight]);
+  }, [canvasSize, imagePan, zoom, rotation, cropRect, showGrid, loadedSize]);
 
   useEffect(() => {
     render();
@@ -380,33 +400,51 @@ export const CropCanvas: React.FC<CropCanvasProps> = ({
     dragRef.current = null;
   };
 
-  // Perform Final Crop Render
+  // Perform 100% Accurate Full-Resolution Crop
   const handleApply = () => {
     const img = imageRef.current;
     if (!img) return;
 
+    const w = canvasSize.w;
+    const h = canvasSize.h;
+    const nw = img.naturalWidth || loadedSize.w;
+    const nh = img.naturalHeight || loadedSize.h;
+
+    // Calculate scale factor relating screen pixels to original full-resolution pixels
+    const baseScale = Math.min((w * 0.8) / nw, (h * 0.8) / nh);
+    const currentScale = baseScale * zoom;
+
+    // Full-resolution target dimensions
+    const outW = Math.max(1, Math.round(cropRect.width / currentScale));
+    const outH = Math.max(1, Math.round(cropRect.height / currentScale));
+
     const outCanvas = document.createElement('canvas');
-    outCanvas.width = Math.round(cropRect.width);
-    outCanvas.height = Math.round(cropRect.height);
+    outCanvas.width = outW;
+    outCanvas.height = outH;
     const ctx = outCanvas.getContext('2d')!;
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
-    const w = canvasSize.w;
-    const h = canvasSize.h;
-    const cx = w / 2 + imagePan.x - cropRect.x;
-    const cy = h / 2 + imagePan.y - cropRect.y;
+    // Centers in screen canvas coordinates
+    const cropCenterX = cropRect.x + cropRect.width / 2;
+    const cropCenterY = cropRect.y + cropRect.height / 2;
+    const imgCenterX = w / 2 + imagePan.x;
+    const imgCenterY = h / 2 + imagePan.y;
+
+    // Delta from crop center to image center in canvas space
+    const deltaX = imgCenterX - cropCenterX;
+    const deltaY = imgCenterY - cropCenterY;
+
+    // Center where image should be drawn on the full-resolution output canvas
+    const outImgCenterX = outW / 2 + (deltaX / currentScale);
+    const outImgCenterY = outH / 2 + (deltaY / currentScale);
 
     ctx.save();
-    ctx.translate(cx, cy);
+    ctx.translate(outImgCenterX, outImgCenterY);
     ctx.rotate((rotation * Math.PI) / 180);
-
-    const baseScale = Math.min((w * 0.8) / naturalWidth, (h * 0.8) / naturalHeight);
-    const drawW = naturalWidth * baseScale * zoom;
-    const drawH = naturalHeight * baseScale * zoom;
-
-    ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    // Draw source image at 100% natural resolution
+    ctx.drawImage(img, -nw / 2, -nh / 2, nw, nh);
     ctx.restore();
 
     onApplyCrop(outCanvas);

@@ -49,6 +49,32 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
   const [cropAspectRatio, setCropAspectRatio] = useState<string>('1:1');
   const [liveCropRect, setLiveCropRect] = useState<CropRect | null>(null);
 
+  const currentDisplayUrl = processedObjectUrl || activeImage?.objectUrl || '';
+
+  const handleUpdateImageResult = useCallback((
+    newBlob: Blob,
+    newObjectUrl: string,
+    newDimensions?: { width: number; height: number }
+  ) => {
+    setProcessedBlob(newBlob);
+    setProcessedObjectUrl(newObjectUrl);
+
+    if (newDimensions && activeImage) {
+      onImageSelected({
+        ...activeImage,
+        objectUrl: newObjectUrl,
+        metadata: {
+          ...activeImage.metadata,
+          width: newDimensions.width,
+          height: newDimensions.height,
+          aspectRatio: newDimensions.width / newDimensions.height,
+          sizeBytes: newBlob.size,
+          type: newBlob.type || activeImage.metadata.type,
+        },
+      });
+    }
+  }, [activeImage, onImageSelected]);
+
   const handleTransformChange = useCallback((t: TransformState) => {
     setLiveTransform(t);
   }, []);
@@ -57,10 +83,13 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
     canvas.toBlob((blob) => {
       if (blob) {
         const url = URL.createObjectURL(blob);
-        handleUpdateImageResult(blob, url);
+        handleUpdateImageResult(blob, url, {
+          width: canvas.width,
+          height: canvas.height,
+        });
       }
     }, 'image/png', 1);
-  }, []);
+  }, [handleUpdateImageResult]);
 
   const handleInspectorChange = useCallback((partial: Partial<TransformState>) => {
     setInspectorOverride(partial);
@@ -77,13 +106,6 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
     );
   }
 
-  const currentDisplayUrl = processedObjectUrl || activeImage.objectUrl;
-
-  const handleUpdateImageResult = (newBlob: Blob, newObjectUrl: string) => {
-    setProcessedBlob(newBlob);
-    setProcessedObjectUrl(newObjectUrl);
-  };
-
   const handleApplyPreset = (preset: PassportPreset) => {
     setActivePreset(preset);
   };
@@ -92,7 +114,10 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
     resizedCanvas.toBlob((blob) => {
       if (blob) {
         const url = URL.createObjectURL(blob);
-        handleUpdateImageResult(blob, url);
+        handleUpdateImageResult(blob, url, {
+          width: resizedCanvas.width,
+          height: resizedCanvas.height,
+        });
       }
     }, 'image/jpeg', 0.95);
   };
@@ -106,9 +131,12 @@ export const PhotoStudio: React.FC<PhotoStudioProps> = ({
     croppedCanvas.toBlob((blob) => {
       if (blob) {
         const url = URL.createObjectURL(blob);
-        handleUpdateImageResult(blob, url);
+        handleUpdateImageResult(blob, url, {
+          width: croppedCanvas.width,
+          height: croppedCanvas.height,
+        });
       }
-    }, 'image/jpeg', 0.95);
+    }, 'image/png', 1.0);
   };
 
   const handleApplyConversion = (convertedBlob: Blob) => {
